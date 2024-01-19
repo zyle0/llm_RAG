@@ -7,7 +7,7 @@ from langchain.prompts import PromptTemplate
 from langchain.chains import RetrievalQA
 
 
-api_key = 'ff781b1f404885ab28c7bd19b8315832.4zPqfTzMH1pXAJiH'
+api_key = ''
 doc_path = "zfgzbg.txt"
 CHUNK_SIZE = 500
 OVERLAP_SIZE = 50
