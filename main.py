@@ -5,51 +5,84 @@ from llm import ZhipuAILLM
 from langchain.vectorstores import Chroma
 from langchain.prompts import PromptTemplate
 from langchain.chains import RetrievalQA
+import argparse
 
+def loadDocuments():
+    loader = TextLoader(args.doc_path)
+    pages = loader.load()
+    return pages
 
-api_key = ''
-doc_path = "zfgzbg.txt"
-CHUNK_SIZE = 500
-OVERLAP_SIZE = 50
-persist_directory = './data_base/chroma'
+def getLLM():
+    llm = ZhipuAILLM(model="chatglm_turbo", zhipuai_api_key=args.api_key, temperature=0)
+    return llm
 
-embedding = ZhipuAIEmbeddings(zhipuai_api_key=api_key)
-llm = ZhipuAILLM(model="chatglm_turbo", zhipuai_api_key=api_key,temperature=0)
+def getEmbedding():
+    embedding = ZhipuAIEmbeddings(zhipuai_api_key=args.api_key)
+    return embedding
 
-loader = TextLoader(doc_path)
-pages = loader.load()
+def docSplit(pages):
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=args.CHUNK_SIZE,
+        chunk_overlap=args.OVERLAP_SIZE
+    )
+    split_docs = text_splitter.split_documents(pages)
+    return split_docs
 
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=CHUNK_SIZE,
-    chunk_overlap=OVERLAP_SIZE
-)
-split_docs = text_splitter.split_documents(pages)
-print(f"切分后的文件数量：{len(split_docs)}")
-print(f"切分后的字符数（可以用来大致评估 token 数）：{sum([len(doc.page_content) for doc in split_docs])}")
-print(f"正在处理文档...")
-vectordb = Chroma.from_documents(
-    documents=split_docs, 
-    embedding=embedding,
-    persist_directory=persist_directory  # 允许我们将persist_directory目录保存到磁盘上
-)
-print(f"文档处理完成!")
+def vectorization(split_docs, embedding):
+    print(f"正在处理文档...")
+    vectordb = Chroma.from_documents(
+        documents=split_docs, 
+        embedding=embedding,
+        persist_directory=args.persist_directory
+    )
+    print(f"文档处理完成!")
+    return vectordb
 
-# Build prompt
-template = """使用以下上下文片段来回答最后的问题。如果你不知道答案，只需说不知道，不要试图编造答案。答案最多使用三个句子。尽量简明扼要地回答。
-上下文片段: {context}.
-问题：{question}.
-有用的回答："""
-QA_CHAIN_PROMPT = PromptTemplate.from_template(template)
+def getPrompt():
+    # Build prompt
+    template = """仅使用以下上下文片段来回答最后的问题。如果你不知道答案，只需说不知道，尽量简明扼要地回答。
+    上下文片段: {context}
+    问题：{question}"""
+    prompt = PromptTemplate.from_template(template)
+    return prompt
 
-# Run chain
-qa_chain = RetrievalQA.from_chain_type(
-    llm,
-    retriever=vectordb.as_retriever(),
-    return_source_documents=True,
-    chain_type_kwargs={"prompt": QA_CHAIN_PROMPT}
-)
+def initChain(llm, vectordb, prompt):
+    # Run chain
+    qa_chain = RetrievalQA.from_chain_type(
+        llm,
+        retriever=vectordb.as_retriever(),
+        return_source_documents=True,
+        chain_type_kwargs={"prompt": prompt}
+    )
+    return qa_chain
 
-while True:
-    question = input("请输入您的问题:")
-    result = qa_chain({"query": question})
-    print(f"大语言模型的回答：{result['result']}")
+def run():
+    # 加载文档
+    pages = loadDocuments()
+    # 加载大语言模型
+    llm = getLLM()
+    # 加载embedding
+    embedding = getEmbedding()
+    # 文本分割
+    split_docs = docSplit(pages)
+    # 加载向量数据库并文本向量化
+    vectordb = vectorization(split_docs, embedding)
+    # 设计prompt
+    prompt = getPrompt()
+    # 初始化问答链
+    qa_chain = initChain(llm, vectordb, prompt)
+
+    while True:
+        question = input("请输入您的问题:")
+        result = qa_chain({"query": question})
+        print(f"大语言模型的回答：{result['result']}")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--api_key', default='',  help = 'chatglm api key')
+    parser.add_argument('--doc_path', default='zfgzbg.txt', help = 'document path')
+    parser.add_argument('--CHUNK_SIZE', default=500, help = 'Maximum size of chunks to return')
+    parser.add_argument('--OVERLAP_SIZE', default=50, help = 'Overlap in characters between chunks')
+    parser.add_argument('--persist_directory', default='./data_base/chroma', help = 'vectorstores persist directory')
+    args = parser.parse_args()
+    run()
